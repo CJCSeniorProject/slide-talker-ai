@@ -188,7 +188,7 @@ def prepare_environment():
 
 def start():
     print(f"Launching SadTalker Web UI")
-    from app import sadtalker_demo
+    from app1 import sadtalker_demo
     demo = sadtalker_demo()
     demo.launch(share=True)
 

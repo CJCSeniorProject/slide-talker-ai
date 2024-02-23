@@ -2,6 +2,7 @@
 import os
 import shutil
 from argparse import Namespace
+from audio_split import split_audio
 from src.utils.preprocess import CropAndExtract
 from src.test_audio2coeff import Audio2Coeff
 from src.facerender.animate import AnimateFromCoeff
@@ -13,7 +14,7 @@ checkpoints = "checkpoints"
 
 
 class Predictor(BasePredictor):
-    def setup(self):
+    def __init__(self):
         """Load the model into memory to make running multiple predictions efficient"""
         device = "cuda"
 
@@ -93,6 +94,10 @@ class Predictor(BasePredictor):
             description="can crop back to the original videos for the full body aniamtion when preprocess is full",
             default=True,
         ),
+        result_dir = Input(
+            description="path to result directory",
+            default=None,
+        ),
     ) -> Path:
         """Run a single prediction on the model"""
 
@@ -111,11 +116,10 @@ class Predictor(BasePredictor):
         args.ref_pose = None if ref_pose is None else str(ref_pose)
 
         # crop image and extract 3dmm from image
-        results_dir = "results"
-        if os.path.exists(results_dir):
-            shutil.rmtree(results_dir)
-        os.makedirs(results_dir)
-        first_frame_dir = os.path.join(results_dir, "first_frame_dir")
+        if os.path.exists(result_dir):
+            shutil.rmtree(result_dir)
+        os.makedirs(result_dir)
+        first_frame_dir = os.path.join(result_dir, "first_frame_dir")
         os.makedirs(first_frame_dir)
 
         print("3DMM Extraction for source image")
@@ -130,7 +134,7 @@ class Predictor(BasePredictor):
             ref_eyeblink_videoname = os.path.splitext(os.path.split(ref_eyeblink)[-1])[
                 0
             ]
-            ref_eyeblink_frame_dir = os.path.join(results_dir, ref_eyeblink_videoname)
+            ref_eyeblink_frame_dir = os.path.join(result_dir, ref_eyeblink_videoname)
             os.makedirs(ref_eyeblink_frame_dir, exist_ok=True)
             print("3DMM Extraction for the reference video providing eye blinking")
             ref_eyeblink_coeff_path, _, _ = self.preprocess_model.generate(
@@ -144,7 +148,7 @@ class Predictor(BasePredictor):
                 ref_pose_coeff_path = ref_eyeblink_coeff_path
             else:
                 ref_pose_videoname = os.path.splitext(os.path.split(ref_pose)[-1])[0]
-                ref_pose_frame_dir = os.path.join(results_dir, ref_pose_videoname)
+                ref_pose_frame_dir = os.path.join(result_dir, ref_pose_videoname)
                 os.makedirs(ref_pose_frame_dir, exist_ok=True)
                 print("3DMM Extraction for the reference video providing pose")
                 ref_pose_coeff_path, _, _ = self.preprocess_model.generate(
@@ -153,42 +157,47 @@ class Predictor(BasePredictor):
         else:
             ref_pose_coeff_path = None
 
-        # audio2ceoff
-        batch = get_data(
-            first_coeff_path,
-            args.audio_path,
-            device,
-            ref_eyeblink_coeff_path,
-            still=still,
-        )
-        coeff_path = self.audio_to_coeff.generate(
-            batch, results_dir, args.pose_style, ref_pose_coeff_path
-        )
-        # coeff2video
-        print("coeff2video")
-        data = get_facerender_data(
-            coeff_path,
-            crop_pic_path,
-            first_coeff_path,
-            args.audio_path,
-            args.batch_size,
-            args.input_yaw,
-            args.input_pitch,
-            args.input_roll,
-            expression_scale=args.expression_scale,
-            still_mode=still,
-            preprocess=preprocess,
-        )
-        animate_from_coeff.generate(
-            data, results_dir, args.pic_path, crop_info,
-            enhancer=enhancer, background_enhancer=args.background_enhancer,
-            preprocess=preprocess)
+        split_audio_datas = split_audio(args.audio_path, silence_len=150, min_per_slice=45)
 
-        output = "/tmp/out.mp4"
-        mp4_path = os.path.join(results_dir, [f for f in os.listdir(results_dir) if "enhanced.mp4" in f][0])
-        shutil.copy(mp4_path, output)
+        for item in split_audio_datas:
+            split_audio_path = item['path']
 
-        return Path(output)
+            # audio2ceoff
+            batch = get_data(
+                first_coeff_path,
+                split_audio_path,
+                device,
+                ref_eyeblink_coeff_path,
+                still=still,
+            )
+            coeff_path = self.audio_to_coeff.generate(
+                batch, result_dir, args.pose_style, ref_pose_coeff_path
+            )
+            # coeff2video
+            print("coeff2video")
+            data = get_facerender_data(
+                coeff_path,
+                crop_pic_path,
+                first_coeff_path,
+                split_audio_path,
+                args.batch_size,
+                args.input_yaw,
+                args.input_pitch,
+                args.input_roll,
+                expression_scale=args.expression_scale,
+                still_mode=still,
+                preprocess=preprocess,
+            )
+            animate_from_coeff.generate(
+                data, result_dir, args.pic_path, crop_info,
+                enhancer=enhancer, background_enhancer=args.background_enhancer,
+                preprocess=preprocess)
+
+        # output = "/tmp/out.mp4"
+        # mp4_path = os.path.join(result_dir, [f for f in os.listdir(result_dir) if "enhanced.mp4" in f][0])
+        # shutil.copy(mp4_path, output)
+
+        # return Path(output)
 
 
 def load_default():

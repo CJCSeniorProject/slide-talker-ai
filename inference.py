@@ -9,6 +9,8 @@ from src.facerender.animate import AnimateFromCoeff
 from src.generate_batch import get_data
 from src.generate_facerender_batch import get_facerender_data
 
+from audio_split import split_audio
+
 def main(args):
     #torch.backends.cudnn.enabled = False
 
@@ -97,22 +99,27 @@ def main(args):
     else:
         ref_pose_coeff_path=None
 
-    #audio2ceoff
-    batch = get_data(first_coeff_path, audio_path, device, ref_eyeblink_coeff_path, still=args.still)
-    coeff_path = audio_to_coeff.generate(batch, save_dir, pose_style, ref_pose_coeff_path)
+    split_audio_datas = split_audio(audio_path)
 
-    # 3dface render
-    if args.face3dvis:
-        from src.face3d.visualize import gen_composed_video
-        gen_composed_video(args, device, first_coeff_path, coeff_path, audio_path, os.path.join(save_dir, '3dface.mp4'))
-    
-    #coeff2video
-    data = get_facerender_data(coeff_path, crop_pic_path, first_coeff_path, audio_path, 
-                                batch_size, input_yaw_list, input_pitch_list, input_roll_list,
-                                expression_scale=args.expression_scale, still_mode=args.still, preprocess=args.preprocess)
-    
-    animate_from_coeff.generate(data, save_dir, pic_path, crop_info, \
-                                enhancer=args.enhancer, background_enhancer=args.background_enhancer, preprocess=args.preprocess)
+    for item in split_audio_datas:
+        split_audio_path = item['path']
+
+        #audio2ceoff
+        batch = get_data(first_coeff_path, split_audio_path, device, ref_eyeblink_coeff_path, still=args.still)
+        coeff_path = audio_to_coeff.generate(batch, save_dir, pose_style, ref_pose_coeff_path)
+
+        # 3dface render
+        if args.face3dvis:
+            from src.face3d.visualize import gen_composed_video
+            gen_composed_video(args, device, first_coeff_path, coeff_path, split_audio_path, os.path.join(save_dir, '3dface.mp4'))
+        
+        #coeff2video
+        data = get_facerender_data(coeff_path, crop_pic_path, first_coeff_path, split_audio_path, 
+                                    batch_size, input_yaw_list, input_pitch_list, input_roll_list,
+                                    expression_scale=args.expression_scale, still_mode=args.still, preprocess=args.preprocess)
+        
+        animate_from_coeff.generate(data, save_dir, pic_path, crop_info, \
+                                    enhancer=args.enhancer, background_enhancer=args.background_enhancer, preprocess=args.preprocess)
     
 if __name__ == '__main__':
 
